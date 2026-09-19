@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>오늘의 진짜 정보판 — 크립토 시황판</title>
+<style>
+  :root {
+    --bg: #f7f6f2;
+    --panel: #fbfaf7;
+    --text: #1b1d22;
+    --muted: #575b64;
+    --rule: #d7d5cb;
+    --amber: #8a5d13;
+    --red: #93342a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Malgun Gothic", sans-serif;
+    line-height: 1.5;
+    padding: 28px 20px 60px;
+  }
+  main { max-width: 920px; margin: 0 auto; }
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 헤더 */
+  .board-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 2px solid var(--text);
+    padding-bottom: 12px;
+    margin-bottom: 4px;
+  }
+  .board-title { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.01em; }
+  #board-clock { font-size: 0.9rem; color: var(--amber); font-weight: 600; }
+  .board-sub { color: var(--muted); font-size: 0.82rem; margin: 8px 0 20px; }
+
+  .top-actions { margin-bottom: 16px; }
+  button {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 7px 13px;
+    font-size: 0.82rem;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary { border-color: var(--amber); color: var(--amber); font-weight: 600; }
+
+  /* 상단 2열: 가격 | 심리 */
+  .board-grid {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: 18px;
+    align-items: start;
+    margin-bottom: 30px;
+  }
+  .group-panel {
+    border: 1px solid var(--rule);
+    background: var(--panel);
+    border-radius: 5px;
+    padding: 18px 20px;
+  }
+  .group-panel.prices { border-left: 4px solid var(--text); }
+  .group-panel.sentiment { border-left: 4px solid var(--amber); }
+  .group-panel h2 {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text);
+    margin: 0 0 4px;
+  }
+  .group-tag { font-size: 0.72rem; color: var(--muted); margin-bottom: 14px; }
+  .sub-h {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--muted);
+    margin: 18px 0 10px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule);
+  }
+
+  /* 가격 라이브 행 */
+  .price-line { display: flex; justify-content: space-between; align-items: baseline; padding: 9px 0; border-bottom: 1px dashed var(--rule); }
+  .price-line:last-child { border-bottom: none; }
+  .coin-code { font-size: 0.82rem; font-weight: 700; color: var(--muted); min-width: 40px; }
+  .price-right { text-align: right; }
+  .price-value { font-size: 1.35rem; font-weight: 700; }
+  .price-value .unit { font-size: 0.68rem; font-weight: 400; color: var(--muted); margin-left: 3px; }
+  .price-time { display: block; font-size: 0.68rem; color: var(--muted); margin-top: 2px; }
+  .live-loading-text, .live-error-text { font-size: 0.8rem; color: var(--muted); margin: 0; }
+  .live-error-text { color: var(--red); }
+
+  /* 심리(공포탐욕) 피처 값 */
+  .feature-value { font-size: 2.4rem; font-weight: 700; color: var(--amber); line-height: 1; margin: 6px 0 4px; }
+  .feature-value .unit { font-size: 0.9rem; font-weight: 500; color: var(--muted); margin-left: 6px; }
+  .class-line { font-size: 0.85rem; color: var(--muted); margin-bottom: 10px; }
+
+  .meta-line { font-size: 0.76rem; color: var(--muted); line-height: 1.7; margin-top: 8px; }
+  .meta-line a { color: var(--amber); }
+  details.raw-wrap { margin-top: 8px; }
+  details.raw-wrap summary { cursor: pointer; font-size: 0.72rem; color: var(--muted); }
+  pre {
+    background: #efeee7;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 9px;
+    font-size: 0.68rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin-top: 6px;
+  }
+
+  /* 가격 일별 기록 테이블 */
+  .history-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .history-table th, .history-table td { text-align: right; padding: 5px 4px; border-bottom: 1px dashed var(--rule); }
+  .history-table th:first-child, .history-table td:first-child { text-align: left; color: var(--muted); }
+  .history-table th { color: var(--muted); font-weight: 600; font-size: 0.72rem; border-bottom: 1px solid var(--rule); }
+
+  /* 심리 일별 기록 리스트 */
+  .records-list { list-style: none; padding: 0; margin: 0; }
+  .record-row { border-bottom: 1px dashed var(--rule); padding: 7px 0; }
+  .record-row:last-child { border-bottom: none; }
+  .record-summary { display: flex; align-items: baseline; gap: 10px; font-size: 0.8rem; flex-wrap: wrap; }
+  .record-date { color: var(--muted); min-width: 78px; }
+  .record-value { font-weight: 700; }
+  .record-class { color: var(--muted); font-size: 0.74rem; }
+  .raw-toggle { margin-left: auto; padding: 2px 7px; font-size: 0.68rem; border: none; background: none; color: var(--muted); text-decoration: underline; }
+  .raw-detail { margin-top: 4px; }
+  .empty { color: var(--muted); font-size: 0.8rem; padding: 4px 0; }
+  .records-delta { margin-top: 10px; font-size: 0.78rem; color: var(--amber); font-weight: 600; }
+
+  /* 장애 재현 테스트 */
+  section.board-section { margin-bottom: 30px; }
+  section.board-section h2 {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text);
+    margin: 0 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--text);
+  }
+  .section-desc { color: var(--muted); font-size: 0.8rem; margin: -2px 0 14px; }
+  .test-group { margin-bottom: 12px; }
+  .test-group-label { font-size: 0.74rem; color: var(--muted); font-weight: 600; margin: 0 0 6px; }
+  .test-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+  #test-note { font-size: 0.78rem; color: var(--muted); margin: 10px 0; min-height: 1.2em; }
+  .status-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 24px; }
+  .status-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.82rem; border-bottom: 1px dashed var(--rule); }
+  .status-row .label { color: var(--muted); font-size: 0.74rem; }
+  .fresh { color: var(--amber); font-weight: 700; }
+  .stale { color: var(--red); font-weight: 700; }
+
+  footer { font-size: 0.74rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 14px; margin-top: 6px; }
+  footer p { margin: 3px 0; }
+  a { color: var(--amber); }
+
+  @media (max-width: 760px) {
+    .board-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    .status-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="board-header">
+    <div class="board-title">오늘의 진짜 정보판</div>
+    <div id="board-clock" class="mono">—</div>
+  </div>
+  <p class="board-sub">기준 시간대 Asia/Seoul · CoinGecko · alternative.me</p>
+
+  <div class="top-actions">
+    <button id="live-refetch" class="primary">다시 조회하기</button>
+  </div>
+
+  <div class="board-grid">
+    <!-- 가격 그룹: BTC·ETH·XRP -->
+    <div class="group-panel prices">
+      <h2>가격</h2>
+      <div class="group-tag">비트코인 · 이더리움 · 리플</div>
+      <div id="price-live"></div>
+      <div id="price-meta" class="meta-line"></div>
+      <details class="raw-wrap" id="price-raw-wrap" hidden>
+        <summary>원자료(raw) 보기</summary>
+        <pre id="price-raw"></pre>
+      </details>
+      <div class="sub-h">일별 기록 · 전일 대비</div>
+      <div id="price-history"></div>
+    </div>
+
+    <!-- 심리 그룹: 공포탐욕지수 -->
+    <div class="group-panel sentiment">
+      <h2>시장 심리</h2>
+      <div class="group-tag">공포·탐욕 지수</div>
+      <div id="fng-live"></div>
+      <div class="sub-h">일별 기록 · 전일 대비</div>
+      <div id="fng-history"></div>
+    </div>
+  </div>
+
+  <!-- 장애 재현 테스트 -->
+  <section class="board-section">
+    <h2>장애 재현 테스트</h2>
+    <p class="section-desc">
+      아래 버튼은 실제 데이터와 무관한 합성 응답만 재생합니다 (공식 fixture 9종).
+      순서: 초기화 → 정상 D1-A → 정상 D1-B → 실패 1개 → 다시 시도·복구.
+    </p>
+    <div id="test-panel">
+      <div class="test-group">
+        <div class="test-group-label">초기화 / 정상 흐름</div>
+        <div class="test-buttons">
+          <button id="btn-reset">합성 초기화</button>
+          <button data-fixture="T04-NORMAL-D1-A">정상 D1-A (100)</button>
+          <button data-fixture="T04-NORMAL-D1-B">정상 D1-B (105)</button>
+          <button data-fixture="T04-NORMAL-D2">정상 D2 (120)</button>
+        </div>
+      </div>
+      <div class="test-group">
+        <div class="test-group-label">실패 5종 (baseline: D1-A → D1-B 먼저)</div>
+        <div class="test-buttons">
+          <button data-fixture="T04-TIMEOUT">느림 (timeout)</button>
+          <button data-fixture="T04-AUTH-401">401 거절 (auth)</button>
+          <button data-fixture="T04-RATE-429">호출 제한 (429)</button>
+          <button data-fixture="T04-OFFLINE">오프라인</button>
+          <button data-fixture="T04-SCHEMA-BREAK">형식 변경</button>
+        </div>
+      </div>
+      <div class="test-group">
+        <div class="test-group-label">복구</div>
+        <div class="test-buttons">
+          <button data-fixture="T04-RECOVER-D2" class="primary">다시 시도 · 합성 복구</button>
+        </div>
+      </div>
+    </div>
+    <p id="test-note"></p>
+    <div id="test-status"></div>
+  </section>
+
+  <footer>
+    <p>· 계정 생성·로그인·인증·초대·비밀번호·OAuth·CAPTCHA 없이 열립니다.</p>
+    <p>· 외부 API 키를 사용하지 않으며, 브라우저 코드·배포 파일·Git 기록에 비밀값이 없습니다.</p>
+    <p>· 장애 재현 테스트의 합성 값은 실제 조회와 완전히 분리된 상태로 동작합니다.</p>
+  </footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
