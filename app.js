@@ -546,7 +546,7 @@ function renderSandbox(lastFixtureId) {
   box.innerHTML = `
     <div class="status-grid">
       <div class="status-row"><span class="label">마지막 재생</span><span class="mono">${lastFixtureId}</span></div>
-      <div class="status-row"><span class="label">신선도</span><span class="${freshClass}">${freshLabel}</span></div>
+      <div class="status-row"><span class="label">상태</span><span class="${freshClass}">${freshLabel}</span></div>
       <div class="status-row"><span class="label">실패 사유</span><span>${ERROR_LABELS[error_code] || error_code}</span></div>
       <div class="status-row"><span class="label">일별 행 개수</span><span class="mono">${rowCount}</span></div>
       <div class="status-row"><span class="label">저장된 값</span><span class="mono">${storedValue !== null ? storedValue + ' ' + storedUnit : '—'}</span></div>
