@@ -233,13 +233,26 @@ async function fetchLiveReadings() {
     }
   };
 
+  // 일시적 장애(timeout/offline/rate_limit)는 최대 1회 더 자동 재시도한다.
+  const runTransportWithRetry = async (url, maxAttempts = 2) => {
+    let result;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      result = await runTransport(url);
+      const code = classifyTransport(result.transport);
+      const retryable = code === 'timeout' || code === 'offline' || code === 'rate_limit';
+      if (!retryable || attempt === maxAttempts) return result;
+      await sleep(700);
+    }
+    return result;
+  };
+
   const fetchedAt = new Date().toISOString();
   const coinSignals = LIVE_SIGNALS.filter((s) => s.kind === 'coin');
   const runMeta = {};
 
   // 코인 3종 (한 번의 호출 — transport 단계 에러는 3종 모두에 동일 적용)
   let priceRawResponse = null;
-  const { transport: priceTransport, res: priceRes } = await runTransport(COINGECKO_URL);
+  const { transport: priceTransport, res: priceRes } = await runTransportWithRetry(COINGECKO_URL);
   const priceTransportError = classifyTransport(priceTransport);
   let priceJson = null;
   if (!priceTransportError) priceJson = await priceRes.json();
@@ -271,7 +284,7 @@ async function fetchLiveReadings() {
   renderPriceGroup(coinSignals.map((sig) => ({ sig, state: liveStates[sig.id] })), priceRawResponse);
 
   // 공포탐욕지수
-  const { transport: fngTransport, res: fngRes } = await runTransport(FNG_SOURCE_URL);
+  const { transport: fngTransport, res: fngRes } = await runTransportWithRetry(FNG_SOURCE_URL);
   const fngTransportError = classifyTransport(fngTransport);
   let fngRaw = null;
   if (fngTransportError) {
@@ -322,6 +335,7 @@ function renderPriceGroup(items, rawApiResponse) {
           <span class="coin-code">${item.sig.short}</span>
           <span class="price-right">
             <span class="mono price-value">${current_reading.normalized_value.toLocaleString('en-US')}<span class="unit">${current_reading.unit}</span></span>
+            <span class="price-time mono">출처시각 ${formatKst(current_reading.source_time)}</span>
             <span class="price-time" style="color:var(--red);">⚠ 오래된 값 — ${ERROR_LABELS[status.error_code] || status.error_code}</span>
           </span>
         </div>
@@ -339,16 +353,24 @@ function renderPriceGroup(items, rawApiResponse) {
     `;
   }).join('');
 
-  const freshItems = items.filter((item) => !item.loading && item.state.status.freshness === 'fresh');
-  if (freshItems.length) {
-    const sample = freshItems[0].state.current_reading;
-    metaEl.textContent = `출처 ${sample.source_name} · 조회시각 ${formatKst(sample.fetched_at)} · 기준시간대 ${sample.record_timezone}`;
+  // 이번 재조회가 전부 실패해도 시드/직전 조회로 값이 남아 있으면
+  // 출처·조회시각·기준시간대 줄과 원자료 보기를 비우지 않는다.
+  const freshItems = items.filter((item) => !item.loading && item.state.status && item.state.status.freshness === 'fresh');
+  const readableItems = items.filter((item) => !item.loading && item.state.current_reading);
+  const metaSource = freshItems.length ? freshItems : readableItems;
+  if (metaSource.length) {
+    const sample = metaSource[0].state.current_reading;
+    const staleNote = freshItems.length ? '' : ' · ⚠ 지금 재조회 실패 — 마지막 정상 조회 기준';
+    metaEl.textContent = `출처 ${sample.source_name} · 조회시각 ${formatKst(sample.fetched_at)} · 기준시간대 ${sample.record_timezone}${staleNote}`;
     rawWrap.hidden = false;
     rawEl.textContent = JSON.stringify(
-      { normalized: freshItems.map((item) => item.state.current_reading), raw_api_response: rawApiResponse },
+      { normalized: metaSource.map((item) => item.state.current_reading), raw_api_response: freshItems.length ? rawApiResponse : null },
       null,
       2
     );
+  } else {
+    metaEl.textContent = '';
+    rawWrap.hidden = true;
   }
 }
 
@@ -367,6 +389,11 @@ function renderSentimentGroup(payload) {
     liveEl.innerHTML = `
       <div class="feature-value mono">${current_reading.normalized_value}<span class="unit">${current_reading.unit}</span></div>
       <div class="class-line" style="color:var(--red);">⚠ 오래된 값 — ${ERROR_LABELS[status.error_code] || status.error_code}</div>
+      <div class="meta-line">
+        출처 <a href="${current_reading.source_url}" target="_blank" rel="noopener">${current_reading.source_name}</a> ·
+        출처시각 ${formatKst(current_reading.source_time)}<br/>
+        조회시각 ${formatKst(current_reading.fetched_at)} · 기준시간대 ${current_reading.record_timezone}
+      </div>
       <details class="raw-wrap">
         <summary>실시간 원자료(API 응답) 보기</summary>
         <pre>${JSON.stringify({ normalized: current_reading }, null, 2)}</pre>
@@ -402,7 +429,34 @@ async function loadPreservedRecords() {
   } catch {
     preservedRecords = [];
   }
+  seedLiveStatesFromPreserved();
   renderPreservedRecords();
+}
+
+// 이번 세션의 실시간 조회가 실패해도 화면에서 값이 통째로 사라지지 않도록,
+// GitHub Actions가 보존한 신호별 최신 기록을 liveStates 초기값으로 채워 둔다.
+// 이후 fetchLiveReadings가 성공하면 최신값으로 덮어써지고, 실패하면 applyError가
+// 이 시드값을 stale로 표시한 채 그대로 보존한다.
+function seedLiveStatesFromPreserved() {
+  LIVE_SIGNALS.forEach((sig) => {
+    if (liveStates[sig.id].current_reading) return;
+    const rows = preservedRecords
+      .filter((r) => r.signal_id === sig.id)
+      .sort((a, b) => a.record_date.localeCompare(b.record_date));
+    if (!rows.length) return;
+    const latest = rows[rows.length - 1];
+    liveStates[sig.id].current_reading = {
+      signal_id: latest.signal_id,
+      normalized_value: latest.normalized_value,
+      unit: latest.unit,
+      source_name: latest.source_name,
+      source_url: latest.source_url,
+      source_time: latest.source_observed_at,
+      fetched_at: latest.fetched_at,
+      record_timezone: latest.record_timezone,
+      record_date: latest.record_date,
+    };
+  });
 }
 
 function renderPreservedRecords() {
@@ -570,10 +624,10 @@ function renderSandbox(lastFixtureId) {
 
 /* ================================ 초기화 ================================ */
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('live-refetch').addEventListener('click', fetchLiveReadings);
+  await loadPreservedRecords(); // liveStates 시드가 끝난 뒤에 첫 실시간 조회를 시작한다.
   fetchLiveReadings();
-  loadPreservedRecords();
 
   const clockEl = document.getElementById('board-clock');
   const tickClock = () => { clockEl.textContent = formatKst(new Date().toISOString()); };
