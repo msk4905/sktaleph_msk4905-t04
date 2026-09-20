@@ -528,6 +528,15 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(tickClock, 1000);
 
   document.getElementById('btn-reset').addEventListener('click', resetSandboxState);
+
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.tab;
+      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      document.getElementById('tab-panel-board').hidden = target !== 'board';
+      document.getElementById('tab-panel-test').hidden = target !== 'test';
+    });
+  });
   Object.keys(FIXTURE_FILES).forEach((id) => {
     const btn = document.querySelector(`[data-fixture="${id}"]`);
     if (btn) btn.addEventListener('click', () => runTest(id));

@@ -43,6 +43,24 @@
   .board-sub { color: var(--muted); font-size: 0.82rem; margin: 8px 0 20px; }
 
   .top-actions { margin-bottom: 16px; }
+
+  /* 탭 */
+  .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin-bottom: 20px; }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+    padding: 9px 4px;
+    margin-right: 16px;
+    font-size: 0.86rem;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--text); font-weight: 700; border-bottom-color: var(--text); }
+  .tab-panel[hidden] { display: none; }
+
   button {
     background: var(--panel);
     color: var(--text);
@@ -181,77 +199,83 @@
   </div>
   <p class="board-sub">기준 시간대 Asia/Seoul · CoinGecko · alternative.me</p>
 
-  <div class="top-actions">
-    <button id="live-refetch" class="primary">다시 조회하기</button>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="board">정보판</button>
+    <button class="tab-btn" data-tab="test">장애 재현 테스트</button>
   </div>
 
-  <div class="board-grid">
-    <!-- 가격 그룹: BTC·ETH·XRP -->
-    <div class="group-panel prices">
-      <h2>가격</h2>
-      <div class="group-tag">비트코인 · 이더리움 · 리플</div>
-      <div id="price-live"></div>
-      <div id="price-meta" class="meta-line"></div>
-      <details class="raw-wrap" id="price-raw-wrap" hidden>
-        <summary>원자료(raw) 보기</summary>
-        <pre id="price-raw"></pre>
-      </details>
-      <div class="sub-h">일별 기록 · 전일 대비</div>
-      <div id="price-history"></div>
+  <div id="tab-panel-board" class="tab-panel">
+    <div class="top-actions">
+      <button id="live-refetch" class="primary">다시 조회하기</button>
     </div>
 
-    <!-- 심리 그룹: 공포탐욕지수 -->
-    <div class="group-panel sentiment">
-      <h2>시장 심리</h2>
-      <div class="group-tag">공포·탐욕 지수</div>
-      <div id="fng-live"></div>
-      <div class="sub-h">일별 기록 · 전일 대비</div>
-      <div id="fng-history"></div>
+    <div class="board-grid">
+      <!-- 가격 그룹: BTC·ETH·XRP -->
+      <div class="group-panel prices">
+        <h2>가격</h2>
+        <div class="group-tag">비트코인 · 이더리움 · 리플</div>
+        <div id="price-live"></div>
+        <div id="price-meta" class="meta-line"></div>
+        <details class="raw-wrap" id="price-raw-wrap" hidden>
+          <summary>원자료(raw) 보기</summary>
+          <pre id="price-raw"></pre>
+        </details>
+        <div class="sub-h">일별 기록 · 전일 대비</div>
+        <div id="price-history"></div>
+      </div>
+
+      <!-- 심리 그룹: 공포탐욕지수 -->
+      <div class="group-panel sentiment">
+        <h2>시장 심리</h2>
+        <div class="group-tag">공포·탐욕 지수</div>
+        <div id="fng-live"></div>
+        <div class="sub-h">일별 기록 · 전일 대비</div>
+        <div id="fng-history"></div>
+      </div>
     </div>
   </div>
 
-  <!-- 장애 재현 테스트 -->
-  <section class="board-section">
-    <h2>장애 재현 테스트</h2>
-    <p class="section-desc">
-      아래 버튼은 실제 데이터와 무관한 합성 응답만 재생합니다 (공식 fixture 9종).
-      순서: 초기화 → 정상 D1-A → 정상 D1-B → 실패 1개 → 다시 시도·복구.
-    </p>
-    <div id="test-panel">
-      <div class="test-group">
-        <div class="test-group-label">초기화 / 정상 흐름</div>
-        <div class="test-buttons">
-          <button id="btn-reset">합성 초기화</button>
-          <button data-fixture="T04-NORMAL-D1-A">정상 D1-A (100)</button>
-          <button data-fixture="T04-NORMAL-D1-B">정상 D1-B (105)</button>
-          <button data-fixture="T04-NORMAL-D2">정상 D2 (120)</button>
+  <div id="tab-panel-test" class="tab-panel" hidden>
+    <section class="board-section">
+      <h2>장애 재현 테스트</h2>
+      <p class="section-desc">
+        아래 버튼은 실제 데이터와 무관한 합성 응답만 재생합니다 (공식 fixture 9종).
+        순서: 초기화 → 정상 D1-A → 정상 D1-B → 실패 1개 → 다시 시도·복구.
+      </p>
+      <div id="test-panel">
+        <div class="test-group">
+          <div class="test-group-label">초기화 / 정상 흐름</div>
+          <div class="test-buttons">
+            <button id="btn-reset">합성 초기화</button>
+            <button data-fixture="T04-NORMAL-D1-A">정상 D1-A (100)</button>
+            <button data-fixture="T04-NORMAL-D1-B">정상 D1-B (105)</button>
+            <button data-fixture="T04-NORMAL-D2">정상 D2 (120)</button>
+          </div>
+        </div>
+        <div class="test-group">
+          <div class="test-group-label">실패 5종 (baseline: D1-A → D1-B 먼저)</div>
+          <div class="test-buttons">
+            <button data-fixture="T04-TIMEOUT">느림 (timeout)</button>
+            <button data-fixture="T04-AUTH-401">401 거절 (auth)</button>
+            <button data-fixture="T04-RATE-429">호출 제한 (429)</button>
+            <button data-fixture="T04-OFFLINE">오프라인</button>
+            <button data-fixture="T04-SCHEMA-BREAK">형식 변경</button>
+          </div>
+        </div>
+        <div class="test-group">
+          <div class="test-group-label">복구</div>
+          <div class="test-buttons">
+            <button data-fixture="T04-RECOVER-D2" class="primary">다시 시도 · 합성 복구</button>
+          </div>
         </div>
       </div>
-      <div class="test-group">
-        <div class="test-group-label">실패 5종 (baseline: D1-A → D1-B 먼저)</div>
-        <div class="test-buttons">
-          <button data-fixture="T04-TIMEOUT">느림 (timeout)</button>
-          <button data-fixture="T04-AUTH-401">401 거절 (auth)</button>
-          <button data-fixture="T04-RATE-429">호출 제한 (429)</button>
-          <button data-fixture="T04-OFFLINE">오프라인</button>
-          <button data-fixture="T04-SCHEMA-BREAK">형식 변경</button>
-        </div>
-      </div>
-      <div class="test-group">
-        <div class="test-group-label">복구</div>
-        <div class="test-buttons">
-          <button data-fixture="T04-RECOVER-D2" class="primary">다시 시도 · 합성 복구</button>
-        </div>
-      </div>
-    </div>
-    <p id="test-note"></p>
-    <div id="test-status"></div>
-  </section>
+      <p id="test-note"></p>
+      <div id="test-status"></div>
+    </section>
+  </div>
 
   <footer>
-    <p>· 계정 생성·로그인·인증·초대·비밀번호·OAuth·CAPTCHA 없이 열립니다.</p>
-    <p>· 외부 API 키를 사용하지 않으며, 브라우저 코드·배포 파일·Git 기록에 비밀값이 없습니다.</p>
-    <p>· 장애 재현 테스트의 합성 값은 실제 조회와 완전히 분리된 상태로 동작합니다.</p>
+    <p>데이터 출처 · CoinGecko · Alternative.me</p>
   </footer>
 </main>
 <script src="app.js"></script>
