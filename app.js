@@ -1,9 +1,7 @@
 'use strict';
 
 /* =========================================================================
- * ALEPH T04 — 오늘의 진짜 정보판 (BTC · ETH · XRP 시세 + 크립토 공포탐욕지수)
- * 엔진 함수(resetEvaluationState/applySuccessfulReading/applyError/runFixture)는
- * 공식 공개 자료 adapter-reset.example.js 의 상태 전이를 그대로 포팅한 것입니다.
+ * 크립토 시황판 — BTC·ETH·XRP 시세, 공포탐욕지수 실시간 조회/일별 기록/장애 재현
  * ========================================================================= */
 
 const FNG_SOURCE_URL = 'https://api.alternative.me/fng/';
@@ -92,7 +90,7 @@ function formatKst(isoString) {
   return `${byType.year}-${byType.month}-${byType.day} ${byType.hour}:${byType.minute}:${byType.second} KST`;
 }
 
-/* ------------------------- 엔진 (공식 adapter 포팅) ------------------------- */
+/* ------------------------- 엔진: 정상/실패 상태 전이 ------------------------- */
 
 function resetEvaluationState() {
   return {
@@ -169,6 +167,17 @@ function applyError(inputState, errorCode, runMeta = {}) {
   return state;
 }
 
+// transport 결과(모드/상태코드)를 error_code로 분류. fixture 재생과 실시간 조회가
+// 둘 다 이 함수를 거쳐 applyError/applySuccessfulReading으로 들어간다.
+function classifyTransport(transport) {
+  if (transport.mode === 'timeout') return 'timeout';
+  if (transport.mode === 'offline') return 'offline';
+  if (transport.status === 401 || transport.status === 403) return 'auth';
+  if (transport.status === 429) return 'rate_limit';
+  if (transport.status >= 200 && transport.status < 300) return null; // 성공 — payload 검사는 호출자 몫
+  return 'schema_error';
+}
+
 function runFixture(inputState, fixture) {
   const meta = {
     fixture_id: fixture.fixture_id,
@@ -176,26 +185,28 @@ function runFixture(inputState, fixture) {
       ? Number(fixture.transport.headers['retry-after'])
       : null,
   };
-  if (fixture.transport.mode === 'timeout') return applyError(inputState, 'timeout', meta);
-  if (fixture.transport.mode === 'offline') return applyError(inputState, 'offline', meta);
-  if (fixture.transport.status === 401 || fixture.transport.status === 403) return applyError(inputState, 'auth', meta);
-  if (fixture.transport.status === 429) return applyError(inputState, 'rate_limit', meta);
-  if (fixture.transport.status >= 200 && fixture.transport.status < 300) {
-    if (typeof fixture.payload.normalized_value !== 'number') {
-      return applyError(inputState, 'schema_error', meta);
-    }
-    return applySuccessfulReading(inputState, fixture.payload, meta);
+  const errorCode = classifyTransport(fixture.transport);
+  if (errorCode) return applyError(inputState, errorCode, meta);
+  if (typeof fixture.payload.normalized_value !== 'number') {
+    return applyError(inputState, 'schema_error', meta);
   }
-  return applyError(inputState, 'schema_error', meta);
+  return applySuccessfulReading(inputState, fixture.payload, meta);
 }
 
 /* ============================ 카드 1: 실시간 조회 ============================ */
 /* 가격(BTC/ETH/XRP)과 심리(공포탐욕지수)를 별도 그룹으로 렌더링 — 하나가 실패해도
    나머지는 독립적으로 표시됨 */
 
+// 실시간 조회 전용 엔진 상태 — 신호별로 하나씩, resetEvaluationState()로 초기화.
+// fixture 재생과 똑같이 applyError/applySuccessfulReading을 거치므로, 장애 재현
+// 테스트에서 검증한 상태 전이가 실제 조회에도 그대로 적용됨을 코드로 보장한다.
+const liveStates = {};
+LIVE_SIGNALS.forEach((sig) => { liveStates[sig.id] = resetEvaluationState(); });
+let fngClassification = null;
+
 async function fetchLiveReadings() {
-  renderPriceGroup(LIVE_SIGNALS.filter((s) => s.kind === 'coin').map((sig) => ({ sig, state: 'loading' })));
-  renderSentimentGroup({ state: 'loading' });
+  renderPriceGroup(LIVE_SIGNALS.filter((s) => s.kind === 'coin').map((sig) => ({ sig, loading: true })));
+  renderSentimentGroup({ loading: true });
 
   const fetchWithTimeout = async (url) => {
     const controller = new AbortController();
@@ -210,57 +221,70 @@ async function fetchLiveReadings() {
     }
   };
 
-  const classify = (err, res) => {
-    if (res) {
-      if (res.status === 401 || res.status === 403) return 'auth';
-      if (res.status === 429) return 'rate_limit';
-      return 'schema_error';
+  // 실제 fetch 결과를 fixture와 같은 형태(transport descriptor)로 바꿔서
+  // classifyTransport에 넘긴다 — fixture 재생과 완전히 같은 분류 함수를 탄다.
+  const runTransport = async (url) => {
+    try {
+      const res = await fetchWithTimeout(url);
+      return { transport: { mode: 'http', status: res.status }, res };
+    } catch (err) {
+      const mode = err && err.name === 'AbortError' ? 'timeout' : 'offline';
+      return { transport: { mode }, res: null };
     }
-    if (err && err.name === 'AbortError') return 'timeout';
-    return 'offline';
   };
 
   const fetchedAt = new Date().toISOString();
   const coinSignals = LIVE_SIGNALS.filter((s) => s.kind === 'coin');
+  const runMeta = {};
 
-  // 코인 3종 (한 번의 호출)
-  let priceResults;
-  try {
-    const res = await fetchWithTimeout(COINGECKO_URL);
-    if (!res.ok) throw { __httpRes: res };
-    const priceJson = await res.json();
-    priceResults = coinSignals.map((sig) => {
-      const entry = priceJson[sig.coinId];
-      if (!entry || typeof entry.usd !== 'number') return { sig, state: 'error', errorCode: 'schema_error' };
-      const reading = {
-        signal_id: sig.id,
-        normalized_value: entry.usd,
-        unit: sig.unit,
-        source_name: 'CoinGecko',
-        source_url: `https://api.coingecko.com/api/v3/simple/price?ids=${sig.coinId}&vs_currencies=usd`,
-        source_time: entry.last_updated_at ? new Date(entry.last_updated_at * 1000).toISOString() : null,
-        fetched_at: fetchedAt,
-        record_timezone: 'Asia/Seoul',
-        record_date: kstDate(fetchedAt),
-      };
-      return { sig, state: 'ok', reading };
-    });
-  } catch (err) {
-    const code = classify(err, err && err.__httpRes);
-    priceResults = coinSignals.map((sig) => ({ sig, state: 'error', errorCode: code }));
-  }
-  renderPriceGroup(priceResults);
+  // 코인 3종 (한 번의 호출 — transport 단계 에러는 3종 모두에 동일 적용)
+  let priceRawResponse = null;
+  const { transport: priceTransport, res: priceRes } = await runTransport(COINGECKO_URL);
+  const priceTransportError = classifyTransport(priceTransport);
+  let priceJson = null;
+  if (!priceTransportError) priceJson = await priceRes.json();
+  priceRawResponse = priceJson;
+
+  coinSignals.forEach((sig) => {
+    if (priceTransportError) {
+      liveStates[sig.id] = applyError(liveStates[sig.id], priceTransportError, runMeta);
+      return;
+    }
+    const entry = priceJson[sig.coinId];
+    if (!entry || typeof entry.usd !== 'number') {
+      liveStates[sig.id] = applyError(liveStates[sig.id], 'schema_error', runMeta);
+      return;
+    }
+    const reading = {
+      signal_id: sig.id,
+      normalized_value: entry.usd,
+      unit: sig.unit,
+      source_name: 'CoinGecko',
+      source_url: `https://api.coingecko.com/api/v3/simple/price?ids=${sig.coinId}&vs_currencies=usd`,
+      source_time: entry.last_updated_at ? new Date(entry.last_updated_at * 1000).toISOString() : null,
+      fetched_at: fetchedAt,
+      record_timezone: 'Asia/Seoul',
+      record_date: kstDate(fetchedAt),
+    };
+    liveStates[sig.id] = applySuccessfulReading(liveStates[sig.id], reading, runMeta);
+  });
+  renderPriceGroup(coinSignals.map((sig) => ({ sig, state: liveStates[sig.id] })), priceRawResponse);
 
   // 공포탐욕지수
-  try {
-    const res = await fetchWithTimeout(FNG_SOURCE_URL);
-    if (!res.ok) throw { __httpRes: res };
-    const json = await res.json();
+  const { transport: fngTransport, res: fngRes } = await runTransport(FNG_SOURCE_URL);
+  const fngTransportError = classifyTransport(fngTransport);
+  let fngRaw = null;
+  if (fngTransportError) {
+    liveStates['crypto-fear-greed-index'] = applyError(liveStates['crypto-fear-greed-index'], fngTransportError, runMeta);
+  } else {
+    const json = await fngRes.json();
+    fngRaw = json;
     const row = json && Array.isArray(json.data) ? json.data[0] : null;
     const numericValue = row ? Number(row.value) : NaN;
     if (!row || Number.isNaN(numericValue)) {
-      renderSentimentGroup({ state: 'error', errorCode: 'schema_error' });
+      liveStates['crypto-fear-greed-index'] = applyError(liveStates['crypto-fear-greed-index'], 'schema_error', runMeta);
     } else {
+      fngClassification = row.value_classification;
       const reading = {
         signal_id: 'crypto-fear-greed-index',
         normalized_value: numericValue,
@@ -272,30 +296,41 @@ async function fetchLiveReadings() {
         record_timezone: 'Asia/Seoul',
         record_date: kstDate(fetchedAt),
       };
-      renderSentimentGroup({ state: 'ok', reading, classification: row.value_classification });
+      liveStates['crypto-fear-greed-index'] = applySuccessfulReading(liveStates['crypto-fear-greed-index'], reading, runMeta);
     }
-  } catch (err) {
-    renderSentimentGroup({ state: 'error', errorCode: classify(err, err && err.__httpRes) });
   }
+  renderSentimentGroup({ state: liveStates['crypto-fear-greed-index'], raw: fngRaw });
 }
 
-function renderPriceGroup(results) {
+function renderPriceGroup(items, rawApiResponse) {
   const liveEl = document.getElementById('price-live');
   const metaEl = document.getElementById('price-meta');
   const rawWrap = document.getElementById('price-raw-wrap');
   const rawEl = document.getElementById('price-raw');
 
-  liveEl.innerHTML = results.map((r) => {
-    if (r.state === 'loading') {
-      return `<div class="price-line"><span class="coin-code">${r.sig.short}</span><span class="live-loading-text">조회 중...</span></div>`;
+  liveEl.innerHTML = items.map((item) => {
+    if (item.loading) {
+      return `<div class="price-line"><span class="coin-code">${item.sig.short}</span><span class="live-loading-text">조회 중...</span></div>`;
     }
-    if (r.state === 'error') {
-      return `<div class="price-line"><span class="coin-code">${r.sig.short}</span><span class="live-error-text">${ERROR_LABELS[r.errorCode] || r.errorCode}</span></div>`;
+    const { status, current_reading } = item.state;
+    if (status.freshness === 'stale') {
+      if (!current_reading) {
+        return `<div class="price-line"><span class="coin-code">${item.sig.short}</span><span class="live-error-text">조회 실패 — ${ERROR_LABELS[status.error_code] || status.error_code}</span></div>`;
+      }
+      return `
+        <div class="price-line">
+          <span class="coin-code">${item.sig.short}</span>
+          <span class="price-right">
+            <span class="mono price-value">${current_reading.normalized_value.toLocaleString('en-US')}<span class="unit">${current_reading.unit}</span></span>
+            <span class="price-time" style="color:var(--red);">⚠ 오래된 값 — ${ERROR_LABELS[status.error_code] || status.error_code}</span>
+          </span>
+        </div>
+      `;
     }
-    const { reading } = r;
+    const reading = current_reading;
     return `
       <div class="price-line">
-        <span class="coin-code">${r.sig.short}</span>
+        <span class="coin-code">${item.sig.short}</span>
         <span class="price-right">
           <span class="mono price-value">${reading.normalized_value.toLocaleString('en-US')}<span class="unit">${reading.unit}</span></span>
           <span class="price-time mono">출처시각 ${formatKst(reading.source_time)}</span>
@@ -304,30 +339,43 @@ function renderPriceGroup(results) {
     `;
   }).join('');
 
-  const okResults = results.filter((r) => r.state === 'ok');
-  if (okResults.length) {
-    const sample = okResults[0].reading;
+  const freshItems = items.filter((item) => !item.loading && item.state.status.freshness === 'fresh');
+  if (freshItems.length) {
+    const sample = freshItems[0].state.current_reading;
     metaEl.textContent = `출처 ${sample.source_name} · 조회시각 ${formatKst(sample.fetched_at)} · 기준시간대 ${sample.record_timezone}`;
     rawWrap.hidden = false;
-    rawEl.textContent = JSON.stringify(okResults.map((r) => r.reading), null, 2);
-  } else {
-    metaEl.textContent = '';
-    rawWrap.hidden = true;
+    rawEl.textContent = JSON.stringify(
+      { normalized: freshItems.map((item) => item.state.current_reading), raw_api_response: rawApiResponse },
+      null,
+      2
+    );
   }
 }
 
 function renderSentimentGroup(payload) {
   const liveEl = document.getElementById('fng-live');
-  if (payload.state === 'loading') {
+  if (payload.loading) {
     liveEl.innerHTML = '<p class="live-loading-text">조회 중...</p>';
     return;
   }
-  if (payload.state === 'error') {
-    liveEl.innerHTML = `<p class="live-error-text">조회 실패 — ${ERROR_LABELS[payload.errorCode] || payload.errorCode}</p>`;
+  const { status, current_reading } = payload.state;
+  if (status.freshness === 'stale') {
+    if (!current_reading) {
+      liveEl.innerHTML = `<p class="live-error-text">조회 실패 — ${ERROR_LABELS[status.error_code] || status.error_code}</p>`;
+      return;
+    }
+    liveEl.innerHTML = `
+      <div class="feature-value mono">${current_reading.normalized_value}<span class="unit">${current_reading.unit}</span></div>
+      <div class="class-line" style="color:var(--red);">⚠ 오래된 값 — ${ERROR_LABELS[status.error_code] || status.error_code}</div>
+      <details class="raw-wrap">
+        <summary>원자료(raw) 보기</summary>
+        <pre>${JSON.stringify({ normalized: current_reading }, null, 2)}</pre>
+      </details>
+    `;
     return;
   }
-  const { reading, classification } = payload;
-  const classKo = classification ? (CLASS_LABELS_KO[classification] || classification) : '';
+  const reading = current_reading;
+  const classKo = fngClassification ? (CLASS_LABELS_KO[fngClassification] || fngClassification) : '';
   liveEl.innerHTML = `
     <div class="feature-value mono">${reading.normalized_value}<span class="unit">${reading.unit}</span></div>
     ${classKo ? `<div class="class-line">${classKo}</div>` : ''}
@@ -338,7 +386,7 @@ function renderSentimentGroup(payload) {
     </div>
     <details class="raw-wrap">
       <summary>원자료(raw) 보기</summary>
-      <pre>${JSON.stringify(reading, null, 2)}</pre>
+      <pre>${JSON.stringify({ normalized: reading, raw_api_response: payload.raw }, null, 2)}</pre>
     </details>
   `;
 }
@@ -399,6 +447,10 @@ function renderPriceHistory() {
   container.innerHTML = `
     <table class="history-table">${header}${bodyRows}</table>
     <div class="records-delta">${deltaParts.join(' · ')}</div>
+    <details class="raw-wrap" style="margin-top:8px;">
+      <summary>원자료 보기 (BTC·ETH·XRP)</summary>
+      <pre>${JSON.stringify(coinSignals.flatMap((s) => bySignal[s.id]), null, 2)}</pre>
+    </details>
   `;
 }
 
@@ -489,11 +541,12 @@ function renderSandbox(lastFixtureId) {
   const storedValue = lastRow ? lastRow.normalized_value : null;
   const storedUnit = lastRow ? lastRow.unit : '';
   const freshClass = freshness === 'fresh' ? 'fresh' : 'stale';
+  const freshLabel = freshness === 'fresh' ? `최신 (${freshness})` : `⚠ 오래된 값 · 마지막 정상값 (${freshness})`;
 
   box.innerHTML = `
     <div class="status-grid">
       <div class="status-row"><span class="label">마지막 재생</span><span class="mono">${lastFixtureId}</span></div>
-      <div class="status-row"><span class="label">신선도</span><span class="${freshClass}">${freshness}</span></div>
+      <div class="status-row"><span class="label">신선도</span><span class="${freshClass}">${freshLabel}</span></div>
       <div class="status-row"><span class="label">실패 사유</span><span>${ERROR_LABELS[error_code] || error_code}</span></div>
       <div class="status-row"><span class="label">일별 행 개수</span><span class="mono">${rowCount}</span></div>
       <div class="status-row"><span class="label">저장된 값</span><span class="mono">${storedValue !== null ? storedValue + ' ' + storedUnit : '—'}</span></div>
