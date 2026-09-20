@@ -368,7 +368,7 @@ function renderSentimentGroup(payload) {
       <div class="feature-value mono">${current_reading.normalized_value}<span class="unit">${current_reading.unit}</span></div>
       <div class="class-line" style="color:var(--red);">⚠ 오래된 값 — ${ERROR_LABELS[status.error_code] || status.error_code}</div>
       <details class="raw-wrap">
-        <summary>원자료(raw) 보기</summary>
+        <summary>실시간 원자료(API 응답) 보기</summary>
         <pre>${JSON.stringify({ normalized: current_reading }, null, 2)}</pre>
       </details>
     `;
@@ -385,7 +385,7 @@ function renderSentimentGroup(payload) {
       조회시각 ${formatKst(reading.fetched_at)} · 기준시간대 ${reading.record_timezone}
     </div>
     <details class="raw-wrap">
-      <summary>원자료(raw) 보기</summary>
+      <summary>실시간 원자료(API 응답) 보기</summary>
       <pre>${JSON.stringify({ normalized: reading, raw_api_response: payload.raw }, null, 2)}</pre>
     </details>
   `;
@@ -448,7 +448,7 @@ function renderPriceHistory() {
     <table class="history-table">${header}${bodyRows}</table>
     <div class="records-delta">${deltaParts.join(' · ')}</div>
     <details class="raw-wrap" style="margin-top:8px;">
-      <summary>원자료 보기 (BTC·ETH·XRP)</summary>
+      <summary>일별 기록 원자료 보기 (BTC·ETH·XRP)</summary>
       <pre>${JSON.stringify(coinSignals.flatMap((s) => bySignal[s.id]), null, 2)}</pre>
     </details>
   `;
