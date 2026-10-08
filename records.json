@@ -853,5 +853,50 @@
     "fetched_at": "2026-10-07T05:27:09.229Z",
     "record_timezone": "Asia/Seoul",
     "record_date": "2026-10-07"
+  },
+  {
+    "signal_id": "bitcoin-usd",
+    "normalized_value": 82928,
+    "unit": "USD",
+    "source_name": "CoinGecko",
+    "source_url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+    "source_observed_at": "2026-10-08T05:34:10.000Z",
+    "fetched_at": "2026-10-08T05:35:35.954Z",
+    "record_timezone": "Asia/Seoul",
+    "record_date": "2026-10-08"
+  },
+  {
+    "signal_id": "crypto-fear-greed-index",
+    "normalized_value": 64,
+    "unit": "점",
+    "value_classification": "Greed",
+    "source_name": "Alternative.me Fear & Greed Index",
+    "source_url": "https://api.alternative.me/fng/",
+    "source_observed_at": "2026-10-08T00:00:00.000Z",
+    "fetched_at": "2026-10-08T05:35:35.954Z",
+    "record_timezone": "Asia/Seoul",
+    "record_date": "2026-10-08"
+  },
+  {
+    "signal_id": "ethereum-usd",
+    "normalized_value": 2572.69,
+    "unit": "USD",
+    "source_name": "CoinGecko",
+    "source_url": "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+    "source_observed_at": "2026-10-08T05:34:10.000Z",
+    "fetched_at": "2026-10-08T05:35:35.954Z",
+    "record_timezone": "Asia/Seoul",
+    "record_date": "2026-10-08"
+  },
+  {
+    "signal_id": "ripple-usd",
+    "normalized_value": 1.41,
+    "unit": "USD",
+    "source_name": "CoinGecko",
+    "source_url": "https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=usd",
+    "source_observed_at": "2026-10-08T05:34:10.000Z",
+    "fetched_at": "2026-10-08T05:35:35.954Z",
+    "record_timezone": "Asia/Seoul",
+    "record_date": "2026-10-08"
   }
 ]
